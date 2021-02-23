@@ -1,5 +1,6 @@
 `ifndef OPCODE
 `define OPCODE
+
 //second most significant bit in func7, concatenate with 3 bits in func3
 `define op_add     4'b0_000
 `define op_sub     4'b1_000

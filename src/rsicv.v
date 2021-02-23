@@ -239,17 +239,17 @@ imm_gen imm_gen0(
 );
 
 control control_0(
-    .instruction(inst), 
-    .BrLt(BrLt), 
-    .BrEq(BrEq), 
-    .PCSel(PCSel), 
-    .RegWen(RegWen), 
-    .ImmSel(ImmSel), 
-    .BrUn(BrUn), 
-    .ASel(ASel), 
-    .BSel(BSel), 
-    .ALUSel(ALUSel), 
-    .MemRW(MemRW), 
+    .instruction(inst),
+    .BrLt(BrLt),
+    .BrEq(BrEq),
+    .PCSel(PCSel),
+    .RegWen(RegWen),
+    .ImmSel(ImmSel),
+    .BrUn(BrUn),
+    .ASel(ASel),
+    .BSel(BSel),
+    .ALUSel(ALUSel),
+    .MemRW(MemRW),
     .WBSel(WBSel)
 );
 
@@ -273,11 +273,11 @@ begin
         D_E_PC  <= RESET_PC;
         D_E_rd1 <= 32'd0;
         D_E_rd2 <= 32'd0;
-		D_E_ra1 <= 5'd0;
-		D_E_ra2 <= 5'd0;
-		D_E_wa  <= 5'd0;
-		E_M_wa  <= 5'd0;
-		M_W_wa  <= 5'd0;
+        D_E_ra1 <= 5'd0;
+        D_E_ra2 <= 5'd0;
+        D_E_wa  <= 5'd0;
+        E_M_wa  <= 5'd0;
+        M_W_wa  <= 5'd0;
         E_M_rd2 <= 32'd0;
         E_M_PC  <= RESET_PC;
         E_M_alu <= 32'd0;
@@ -317,13 +317,13 @@ begin
         E_M_rd2     <= D_E_rd2;
         E_M_alu     <= alu_out; 
         E_M_inst    <= D_E_inst;
-		E_M_wa		<= D_E_wa;
+        E_M_wa		<= D_E_wa;
         M_MemRW     <= E_MemRW;
         M_WBSel     <= E_WBSel;
         M_RegWen    <= E_RegWen;
         //Memory->Write back
         M_W_wd      <= wd;
-		M_W_wa		<= E_M_wa;
+        M_W_wa		<= E_M_wa;
         M_W_inst    <= E_M_inst;
         W_RegWen    <= M_RegWen;
     end

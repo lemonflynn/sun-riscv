@@ -61,12 +61,14 @@ module assembly_testbench();
 
         rst = 1;
 		#10;
-		//$monitor("x10 is %d, x11 is %d\n", CPU.rf.regs[10], CPU.rf.regs[11]);
 
         // Reset the CPU
         rst = 0;
         repeat (30) @(posedge clk);             // Hold reset for 30 cycles
         rst = 1;
+		$monitor("x1 is %d, x2 is %d, x3 is %d\n", CPU.rf.regs[1],
+													CPU.rf.regs[2], 
+													CPU.rf.regs[3]); 
 
         fork
             begin
