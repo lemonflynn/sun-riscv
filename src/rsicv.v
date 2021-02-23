@@ -19,6 +19,12 @@
 //
 //////////////////////////////////////////////////////////////////////////////////
 `include "common_define.h"
+
+//used for forwarding logic
+`define FORWORD_ID_EX	2'b00
+`define FORWORD_EX_MEM	2'b10
+`define FORWORD_MEM_WB	2'b01
+
 module rsicv#(
     parameter CPU_CLOCK_FREQ = 50_000_000,
     parameter RESET_PC = 32'h4000_0000,
@@ -48,7 +54,7 @@ wire [4:0] ra1, ra2, wa;
 //reg  [31:0] wd;
 wire [31:0] rd1, rd2;
 wire BrUn, BrLt, BrEq; 
-wire [31:0] alu_a, alu_b, alu_out;
+wire [31:0] alu_a, alu_b, alu_forward_a, alu_forward_b, alu_out;
 wire ASel, BSel;
 wire[3:0] ALUSel;
 reg [31:0] PC, inst, inst_little;
@@ -63,6 +69,11 @@ reg [31:0] D_E_rd1, D_E_rd2, E_M_rd2;
 reg [31:0] D_E_inst, E_M_inst, M_W_inst;
 reg [31:0] E_M_alu;
 reg [31:0] M_W_wd;
+//pipeline register to implement forwarding logic
+reg [4:0]	D_E_ra1, D_E_ra2, D_E_wa;
+reg [4:0]	E_M_wa;
+reg [4:0]	M_W_wa;
+reg [1:0]	Forward_A, Forward_B;
 //pipeline control register
 // Signal E_ASel, E_BSel, E_ImmSel, E_ALUSel will
 // be create in Decode stage, and consume in Execute stage, 
@@ -97,10 +108,49 @@ assign imem_dina = E_M_rd2;
 assign imem_wea = M_MemRW;
 assign ra1 = inst[19:15];
 assign ra2 = inst[24:20];
-assign wa = M_W_inst[11:7];
+assign wa = inst[11:7];
 //assign inst = (F_D_PC[30]==1'b1) ? bios_douta:imem_doutb;
 assign alu_a = (E_ASel==`ASel_reg) ? D_E_rd1:D_E_PC;
 assign alu_b = (E_BSel==`BSel_reg) ? D_E_rd2:imm_dout;
+
+always@(posedge clk)
+begin
+	D_E_ra1 <= ra1;
+end
+
+always@(posedge clk)
+begin
+	D_E_ra2 <= ra2;
+end
+
+always@(posedge clk)
+begin
+	D_E_wa <= wa;
+end
+
+/* forwarding unit */
+always@(*)
+begin
+	if(M_RegWen && E_M_wa != 5'b0 && E_M_wa == D_E_ra1)
+		Forward_A = `FORWORD_EX_MEM;
+	else if(W_RegWen && M_W_wa != 5'b0 && M_W_wa == D_E_ra1)
+		Forward_A = `FORWORD_MEM_WB;
+	else
+		Forward_A = `FORWORD_ID_EX;
+end
+
+always@(*)
+begin
+	if(M_RegWen && E_M_wa != 5'b0 && E_M_wa == D_E_ra2)
+		Forward_B = `FORWORD_EX_MEM;
+	else if(W_RegWen && M_W_wa != 5'b0 && M_W_wa == D_E_ra2)
+		Forward_B = `FORWORD_MEM_WB;
+	else
+		Forward_B = `FORWORD_ID_EX;
+end
+
+assign alu_forward_a = (Forward_A==`FORWORD_EX_MEM)?E_M_alu:((Forward_A==`FORWORD_MEM_WB)?M_W_wd:alu_a);
+assign alu_forward_b = (Forward_B==`FORWORD_EX_MEM)?E_M_alu:((Forward_B==`FORWORD_MEM_WB)?M_W_wd:alu_b);
 
 always@(*)
 begin
@@ -162,7 +212,7 @@ end
 reg_file rf (
     .clk(clk),
     .we(W_RegWen),
-    .ra1(ra1), .ra2(ra2), .wa(wa),
+    .ra1(ra1), .ra2(ra2), .wa(M_W_wa),
     .wd(M_W_wd),
     .rd1(rd1), .rd2(rd2)
 );
@@ -176,8 +226,8 @@ branch_comparator br(
 );
 
 alu alu_0(
-    .inputA(alu_a), 
-    .inputB(alu_b), 
+    .inputA(alu_forward_a), 
+    .inputB(alu_forward_b), 
     .ALUSel(E_ALUSel), 
     .out(alu_out)
 );
@@ -223,6 +273,11 @@ begin
         D_E_PC  <= RESET_PC;
         D_E_rd1 <= 32'd0;
         D_E_rd2 <= 32'd0;
+		D_E_ra1 <= 5'd0;
+		D_E_ra2 <= 5'd0;
+		D_E_wa  <= 5'd0;
+		E_M_wa  <= 5'd0;
+		M_W_wa  <= 5'd0;
         E_M_rd2 <= 32'd0;
         E_M_PC  <= RESET_PC;
         E_M_alu <= 32'd0;
@@ -249,7 +304,7 @@ begin
         D_E_rd1     <= rd1;
         D_E_rd2     <= rd2;
         D_E_inst    <= inst;
-        //control signal
+        //--control signal
         E_ASel      <= ASel;
         E_BSel      <= BSel;
         E_ImmSel    <= ImmSel;
@@ -262,11 +317,13 @@ begin
         E_M_rd2     <= D_E_rd2;
         E_M_alu     <= alu_out; 
         E_M_inst    <= D_E_inst;
+		E_M_wa		<= D_E_wa;
         M_MemRW     <= E_MemRW;
         M_WBSel     <= E_WBSel;
         M_RegWen    <= E_RegWen;
         //Memory->Write back
         M_W_wd      <= wd;
+		M_W_wa		<= E_M_wa;
         M_W_inst    <= E_M_inst;
         W_RegWen    <= M_RegWen;
     end
