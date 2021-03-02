@@ -57,7 +57,7 @@ wire BrUn, BrLt, BrEq;
 wire [31:0] alu_a, alu_b, alu_forward_a, alu_forward_b, alu_out;
 wire ASel, BSel;
 wire[3:0] ALUSel;
-reg [31:0] PC, inst, inst_little;
+reg [31:0] PC, inst, F_D_inst;
 wire [31:0] imm_dout;
 wire [2:0] ImmSel;
 wire PCSel;
@@ -95,7 +95,7 @@ reg W_RegWen;
 
 assign bios_ena = 1;
 assign bios_enb = 1;
-assign bios_addra = F_D_PC[11:0];
+assign bios_addra = PC[11:0];
 assign bios_addrb = E_M_alu[11:0];
 assign dmem_addr = E_M_alu[13:0];
 assign dmem_din = E_M_rd2;
@@ -103,13 +103,12 @@ assign dmem_we = M_MemRW;
 assign dmem_en = 1;
 assign imem_ena = 1;
 assign imem_addra = E_M_alu[13:0];
-assign imem_addrb = F_D_PC[13:0];
+assign imem_addrb = PC[13:0];
 assign imem_dina = E_M_rd2;
 assign imem_wea = M_MemRW;
 assign ra1 = inst[19:15];
 assign ra2 = inst[24:20];
 assign wa = inst[11:7];
-//assign inst = (F_D_PC[30]==1'b1) ? bios_douta:imem_doutb;
 assign alu_a = (E_ASel==`ASel_reg) ? D_E_rd1:D_E_PC;
 assign alu_b = (E_BSel==`BSel_reg) ? D_E_rd2:imm_dout;
 
@@ -152,14 +151,15 @@ end
 assign alu_forward_a = (Forward_A==`FORWORD_EX_MEM)?E_M_alu:((Forward_A==`FORWORD_MEM_WB)?M_W_wd:alu_a);
 assign alu_forward_b = (Forward_B==`FORWORD_EX_MEM)?E_M_alu:((Forward_B==`FORWORD_MEM_WB)?M_W_wd:alu_b);
 
-always@(*)
+always@(posedge clk)
 begin
-	inst_little = (F_D_PC[30]==1'b1) ? bios_douta:imem_doutb;
+	F_D_inst <= (PC[30]==1'b1) ? bios_douta:imem_doutb;
 end
 
+/* we need to handle big to little ending transform */
 always@(*)
 begin
-	inst = {inst_little[7:0], inst_little[15:8], inst_little[23:16], inst_little[31:24]};
+	inst = {F_D_inst[7:0], F_D_inst[15:8], F_D_inst[23:16], F_D_inst[31:24]};
 end
 
 bios_mem bios_mem (
