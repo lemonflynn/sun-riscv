@@ -24,6 +24,8 @@
 `define FORWORD_ID_EX	2'b00
 `define FORWORD_EX_MEM	2'b10
 `define FORWORD_MEM_WB	2'b01
+`define STALL           1'b1
+`define UPDATE          1'b0
 
 module rsicv#(
     parameter CPU_CLOCK_FREQ = 50_000_000,
@@ -74,6 +76,7 @@ reg [4:0]	D_E_ra1, D_E_ra2, D_E_wa;
 reg [4:0]	E_M_wa;
 reg [4:0]	M_W_wa;
 reg [1:0]	Forward_A, Forward_B;
+reg bubble;
 //pipeline control register
 // Signal E_ASel, E_BSel, E_ImmSel, E_ALUSel will
 // be create in Decode stage, and consume in Execute stage, 
@@ -151,9 +154,24 @@ end
 assign alu_forward_a = (Forward_A==`FORWORD_EX_MEM)?E_M_alu:((Forward_A==`FORWORD_MEM_WB)?M_W_wd:alu_a);
 assign alu_forward_b = (Forward_B==`FORWORD_EX_MEM)?E_M_alu:((Forward_B==`FORWORD_MEM_WB)?M_W_wd:alu_b);
 
+/* hazard detection unit */
+always@(*)
+begin
+    if(E_MemRW == `MemRead && E_WBSel == `WBSel_mem &&
+        D_E_wa != 0 && (D_E_wa == ra1 || D_E_wa == ra2))begin
+    /* stall the pipeline */
+        bubble  = `STALL;
+    end else begin
+        bubble  = `UPDATE;
+    end
+end
+
 always@(posedge clk)
 begin
-	F_D_inst <= (PC[30]==1'b1) ? bios_douta:imem_doutb;
+    if(bubble == `UPDATE)
+	    F_D_inst <= (PC[30]==1'b1) ? bios_douta:imem_doutb;
+    else
+        F_D_inst <= F_D_inst;
 end
 
 /* we need to handle big to little ending transform */
@@ -258,10 +276,14 @@ begin
     if(rst == 1'b0)begin
         PC <= RESET_PC; 
     end else begin
-        if(PCSel == `PCSel_next)
-            PC <= PC + 31'd4;
-        else
-            PC <= E_M_alu;
+        if(bubble == `UPDATE)begin
+            if(PCSel == `PCSel_next)
+                PC <= PC + 31'd4;
+            else
+                PC <= E_M_alu;
+        end else begin
+            PC <= PC;
+        end
     end
 end
 
@@ -296,6 +318,7 @@ begin
         M_WBSel     <= 2'b0;
         M_RegWen    <= 1'b0;
         W_RegWen    <= 1'b0;
+        bubble      <= `UPDATE;
     end else begin
         //fetch->Decode
         F_D_PC  <= PC;
@@ -309,17 +332,22 @@ begin
         E_BSel      <= BSel;
         E_ImmSel    <= ImmSel;
         E_ALUSel    <= ALUSel;
-        E_MemRW     <= MemRW;
         E_WBSel     <= WBSel;
-        E_RegWen    <= RegWen;
-        //Execute->Memory
+        if(bubble == `STALL)begin
+            E_MemRW     <= 4'b0;
+            E_RegWen    <= 1'b0;
+        end else begin
+            E_MemRW     <= MemRW;
+            E_RegWen    <= RegWen;
+        end
         E_M_PC      <= D_E_PC;
         E_M_rd2     <= D_E_rd2;
         E_M_alu     <= alu_out; 
         E_M_inst    <= D_E_inst;
         E_M_wa		<= D_E_wa;
-        M_MemRW     <= E_MemRW;
+        //Execute->Memory
         M_WBSel     <= E_WBSel;
+        M_MemRW     <= E_MemRW;
         M_RegWen    <= E_RegWen;
         //Memory->Write back
         M_W_wd      <= wd;

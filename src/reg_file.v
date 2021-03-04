@@ -31,8 +31,8 @@ module reg_file(
 
 reg[31:0]regs[31:0];
 
-assign rd1 =(ra1==5'b0)?32'b0:regs[ra1];
-assign rd2 =(ra2==5'b0)?32'b0:regs[ra2];
+assign rd1 =(ra1==5'b0)?32'b0:((ra1 == wa)?wd:regs[ra1]);
+assign rd2 =(ra2==5'b0)?32'b0:((ra2 == wa)?wd:regs[ra2]);
 
 always@(posedge clk)
 begin
