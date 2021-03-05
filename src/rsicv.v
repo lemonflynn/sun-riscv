@@ -69,6 +69,7 @@ wire [3:0] MemRW;
 reg [31:0] F_D_PC, D_E_PC, E_M_PC;
 reg [31:0] D_E_rd1, D_E_rd2, E_M_rd2;
 reg [31:0] D_E_inst, E_M_inst, M_W_inst;
+reg [31:0] D_E_imm_dout;
 reg [31:0] E_M_alu;
 reg [31:0] M_W_wd;
 //pipeline register to implement forwarding logic
@@ -78,11 +79,10 @@ reg [4:0]	M_W_wa;
 reg [1:0]	Forward_A, Forward_B;
 reg bubble;
 //pipeline control register
-// Signal E_ASel, E_BSel, E_ImmSel, E_ALUSel will
+// Signal E_ASel, E_BSel, E_ALUSel will
 // be create in Decode stage, and consume in Execute stage, 
 // others will flow to next stage.
 reg E_ASel, E_BSel;
-reg [2:0] E_ImmSel;
 reg [3:0] E_ALUSel;
 reg [3:0] E_MemRW;
 reg [1:0] E_WBSel;
@@ -113,7 +113,7 @@ assign ra1 = inst[19:15];
 assign ra2 = inst[24:20];
 assign wa = inst[11:7];
 assign alu_a = (E_ASel==`ASel_reg) ? D_E_rd1:D_E_PC;
-assign alu_b = (E_BSel==`BSel_reg) ? D_E_rd2:imm_dout;
+assign alu_b = (E_BSel==`BSel_reg) ? D_E_rd2:D_E_imm_dout;
 
 always@(posedge clk)
 begin
@@ -251,8 +251,8 @@ alu alu_0(
 );
 
 imm_gen imm_gen0(
-    .inst(D_E_inst),
-    .immSel(E_ImmSel),
+    .inst(inst),
+    .immSel(ImmSel),
     .out(imm_dout)
 );
 
@@ -309,7 +309,6 @@ begin
         M_W_inst<= 32'd0;
         E_ASel      <= 1'b0;
         E_BSel      <= 1'b0;
-        E_ImmSel    <= 3'b0;
         E_ALUSel    <= 4'b0;
         E_MemRW     <= 4'b0;
         E_WBSel     <= 2'b0;
@@ -327,10 +326,10 @@ begin
         D_E_rd1     <= rd1;
         D_E_rd2     <= rd2;
         D_E_inst    <= inst;
+        D_E_imm_dout<= imm_dout;
         //--control signal
         E_ASel      <= ASel;
         E_BSel      <= BSel;
-        E_ImmSel    <= ImmSel;
         E_ALUSel    <= ALUSel;
         E_WBSel     <= WBSel;
         if(bubble == `STALL)begin
