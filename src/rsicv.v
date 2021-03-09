@@ -21,11 +21,14 @@
 `include "common_define.h"
 
 //used for forwarding logic
-`define FORWORD_ID_EX	2'b00
+`define FORWORD_IF_ID	2'b00
+`define FORWORD_ID_EX	2'b01
 `define FORWORD_EX_MEM	2'b10
-`define FORWORD_MEM_WB	2'b01
-`define STALL           1'b1
+`define FORWORD_MEM_WB	2'b11
 `define UPDATE          1'b0
+`define STALL           1'b1
+`define NO_FLUSH        1'b0
+`define FLUSH           1'b1
 
 module rsicv#(
     parameter CPU_CLOCK_FREQ = 50_000_000,
@@ -54,7 +57,7 @@ wire RegWen;
 wire [1:0] WBSel;
 wire [4:0] ra1, ra2, wa;
 //reg  [31:0] wd;
-wire [31:0] rd1, rd2;
+wire [31:0] rd1, rd2, branch_rd1, branch_rd2;
 wire BrUn, BrLt, BrEq; 
 wire [31:0] alu_a, alu_b, alu_forward_a, alu_forward_b, alu_out;
 wire ASel, BSel;
@@ -70,14 +73,16 @@ reg [31:0] F_D_PC, D_E_PC, E_M_PC;
 reg [31:0] D_E_rd1, D_E_rd2, E_M_rd2;
 reg [31:0] D_E_inst, E_M_inst, M_W_inst;
 reg [31:0] D_E_imm_dout;
-reg [31:0] E_M_alu;
+reg [31:0] E_M_alu, pc_alu;
 reg [31:0] M_W_wd;
 //pipeline register to implement forwarding logic
 reg [4:0]	D_E_ra1, D_E_ra2, D_E_wa;
 reg [4:0]	E_M_wa;
 reg [4:0]	M_W_wa;
-reg [1:0]	Forward_A, Forward_B;
-reg bubble;
+reg [1:0]	Forward_A, Forward_B, branch_forward_1, branch_forward_2;
+//bubble is insert in to pipeline if we need to stall pipeline for one clock.
+//ID_Flush is used to flush F_D pipeline register when branch prediction failed.
+reg bubble, ID_Flush;
 //pipeline control register
 // Signal E_ASel, E_BSel, E_ALUSel will
 // be create in Decode stage, and consume in Execute stage, 
@@ -115,21 +120,6 @@ assign wa = inst[11:7];
 assign alu_a = (E_ASel==`ASel_reg) ? D_E_rd1:D_E_PC;
 assign alu_b = (E_BSel==`BSel_reg) ? D_E_rd2:D_E_imm_dout;
 
-always@(posedge clk)
-begin
-	D_E_ra1 <= ra1;
-end
-
-always@(posedge clk)
-begin
-	D_E_ra2 <= ra2;
-end
-
-always@(posedge clk)
-begin
-	D_E_wa <= wa;
-end
-
 /* forwarding unit */
 always@(*)
 begin
@@ -166,13 +156,45 @@ begin
     end
 end
 
+/* forwarding unit for branch comparator */
+always@(*)
+begin
+    /* do we have to check M_RegWen or W_RegWen ? */
+    if(ra1 != 5'b0 && ra1 == E_M_wa)
+        branch_forward_1 = `FORWORD_EX_MEM;
+    else if(ra1 != 5'b0 && ra1 == M_W_wa)
+        branch_forward_1 = `FORWORD_MEM_WB;
+    else
+        branch_forward_1 = `FORWORD_IF_ID;
+end
+
+always@(*)
+begin
+    if(ra2 != 5'b0 && ra2 == E_M_wa)
+        branch_forward_2 = `FORWORD_EX_MEM;
+    else if(ra2 != 5'b0 && ra2 == M_W_wa)
+        branch_forward_2 = `FORWORD_MEM_WB;
+    else
+        branch_forward_2 = `FORWORD_IF_ID;
+end
+
+assign branch_rd1 = (branch_forward_1==`FORWORD_EX_MEM)?E_M_alu:((branch_forward_1==`FORWORD_MEM_WB)?M_W_wd:rd1);
+assign branch_rd2 = (branch_forward_2==`FORWORD_EX_MEM)?E_M_alu:((branch_forward_2==`FORWORD_MEM_WB)?M_W_wd:rd2);
+
 always@(posedge clk)
 begin
-    if(bubble == `UPDATE)
-	    F_D_inst <= (PC[30]==1'b1) ? bios_douta:imem_doutb;
-    else
-        F_D_inst <= F_D_inst;
+    if(bubble == `UPDATE) begin
+        if(ID_Flush == `NO_FLUSH)
+            F_D_inst <= (PC[30]==1'b1) ? bios_douta:imem_doutb;
+        else
+            F_D_inst <= 32'b0;
+    end else begin
+            F_D_inst <= F_D_inst;
+    end
 end
+
+always@(*)pc_alu = F_D_PC + imm_dout;
+always@(*)ID_Flush = (PCSel == `PCSel_next) ? `NO_FLUSH:`FLUSH;
 
 /* we need to handle big to little ending transform */
 always@(*)
@@ -236,8 +258,8 @@ reg_file rf (
 );
 
 branch_comparator br(
-    .input1(rd1),
-    .input2(rd2),
+    .input1(branch_rd1),
+    .input2(branch_rd2),
     .BrUn(BrUn),
     .BrLt(BrLt),
     .BrEq(BrEq)
@@ -277,10 +299,13 @@ begin
         PC <= RESET_PC; 
     end else begin
         if(bubble == `UPDATE)begin
-            if(PCSel == `PCSel_next)
+            if(PCSel == `PCSel_next) begin
                 PC <= PC + 31'd4;
-            else
-                PC <= E_M_alu;
+                ID_Flush <= `NO_FLUSH;
+            end else begin
+                PC <= pc_alu;
+                ID_Flush <= `FLUSH;
+            end
         end else begin
             PC <= PC;
         end
@@ -318,14 +343,23 @@ begin
         M_RegWen    <= 1'b0;
         W_RegWen    <= 1'b0;
         bubble      <= `UPDATE;
+        ID_Flush    <= `NO_FLUSH;
+        pc_alu      <= RESET_PC;
     end else begin
         //fetch->Decode
-        F_D_PC  <= PC;
+        if(ID_Flush == `NO_FLUSH)
+            F_D_PC  <= PC;
+        else
+        /* should be zeor ? */
+            F_D_PC  <= RESET_PC;
         //Decode->Execute
         D_E_PC      <= F_D_PC;
         D_E_rd1     <= rd1;
         D_E_rd2     <= rd2;
         D_E_inst    <= inst;
+        D_E_ra1     <= ra1;
+        D_E_ra2     <= ra2;
+        D_E_wa      <= wa;
         D_E_imm_dout<= imm_dout;
         //--control signal
         E_ASel      <= ASel;
