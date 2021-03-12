@@ -83,6 +83,7 @@ reg [1:0]	Forward_A, Forward_B, branch_forward_1, branch_forward_2;
 //bubble is insert in to pipeline if we need to stall pipeline for one clock.
 //ID_Flush is used to flush F_D pipeline register when branch prediction failed.
 reg bubble, ID_Flush;
+wire [4:0] inst_opcode_5;
 //pipeline control register
 // Signal E_ASel, E_BSel, E_ALUSel will
 // be create in Decode stage, and consume in Execute stage, 
@@ -119,6 +120,7 @@ assign ra2 = inst[24:20];
 assign wa = inst[11:7];
 assign alu_a = (E_ASel==`ASel_reg) ? D_E_rd1:D_E_PC;
 assign alu_b = (E_BSel==`BSel_reg) ? D_E_rd2:D_E_imm_dout;
+assign inst_opcode_5 = inst[6:2];
 
 /* forwarding unit */
 always@(*)
@@ -149,7 +151,26 @@ always@(*)
 begin
     if(E_MemRW == `MemRead && E_WBSel == `WBSel_mem &&
         D_E_wa != 0 && (D_E_wa == ra1 || D_E_wa == ra2))begin
-    /* stall the pipeline */
+        /* stall the pipeline */
+        bubble  = `STALL;
+    end else if(inst_opcode_5 == `B_type &&
+        /*
+        * if branch instruction need the result from previous instruction, and
+        * when forwarding cannot help, we need to stall the pipeline
+        * such as:
+        * add x1, x3, x4
+        * beq x1, x2, 8
+        */
+        D_E_wa != 0 && (D_E_wa == ra1 || D_E_wa == ra2))begin
+        bubble  = `STALL;
+    end else if(inst_opcode_5 == `B_type &&
+        /*
+        * if load followed by branch, we need to stall one more clock
+        * such as:
+        * ld x1, 0(x3)
+        * beq x1, x2, 8
+        */
+        M_WBSel == `WBSel_mem && E_M_wa != 0 && (E_M_wa == ra1 || E_M_wa == ra2))begin
         bubble  = `STALL;
     end else begin
         bubble  = `UPDATE;
@@ -194,6 +215,10 @@ begin
 end
 
 always@(*)pc_alu = F_D_PC + imm_dout;
+/*
+* If PCSel is not PCSel_next, which means we have a branch instruction,
+* we need to flush the pipeline.
+*/
 always@(*)ID_Flush = (PCSel == `PCSel_next) ? `NO_FLUSH:`FLUSH;
 
 /* we need to handle big to little ending transform */
@@ -299,13 +324,10 @@ begin
         PC <= RESET_PC; 
     end else begin
         if(bubble == `UPDATE)begin
-            if(PCSel == `PCSel_next) begin
+            if(PCSel == `PCSel_next)
                 PC <= PC + 31'd4;
-                ID_Flush <= `NO_FLUSH;
-            end else begin
+            else
                 PC <= pc_alu;
-                ID_Flush <= `FLUSH;
-            end
         end else begin
             PC <= PC;
         end
@@ -347,11 +369,15 @@ begin
         pc_alu      <= RESET_PC;
     end else begin
         //fetch->Decode
-        if(ID_Flush == `NO_FLUSH)
-            F_D_PC  <= PC;
-        else
-        /* should be zeor ? */
-            F_D_PC  <= RESET_PC;
+        if(bubble == `UPDATE)begin
+            if(ID_Flush == `NO_FLUSH)
+                F_D_PC  <= PC;
+            else
+            /* should be zeor ? */
+                F_D_PC  <= RESET_PC;
+        end else begin
+            F_D_PC  <= F_D_PC;
+        end
         //Decode->Execute
         D_E_PC      <= F_D_PC;
         D_E_rd1     <= rd1;
@@ -359,7 +385,6 @@ begin
         D_E_inst    <= inst;
         D_E_ra1     <= ra1;
         D_E_ra2     <= ra2;
-        D_E_wa      <= wa;
         D_E_imm_dout<= imm_dout;
         //--control signal
         E_ASel      <= ASel;
@@ -369,9 +394,11 @@ begin
         if(bubble == `STALL)begin
             E_MemRW     <= 4'b0;
             E_RegWen    <= 1'b0;
+            D_E_wa      <= 5'd0;
         end else begin
             E_MemRW     <= MemRW;
             E_RegWen    <= RegWen;
+            D_E_wa      <= wa;
         end
         E_M_PC      <= D_E_PC;
         E_M_rd2     <= D_E_rd2;
