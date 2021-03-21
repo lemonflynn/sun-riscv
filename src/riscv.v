@@ -21,16 +21,16 @@
 `include "common_define.h"
 
 //used for forwarding logic
-`define FORWORD_IF_ID	2'b00
-`define FORWORD_ID_EX	2'b01
-`define FORWORD_EX_MEM	2'b10
-`define FORWORD_MEM_WB	2'b11
+`define FORWARD_IF_ID	2'b00
+`define FORWARD_ID_EX	2'b01
+`define FORWARD_EX_MEM	2'b10
+`define FORWARD_MEM_WB	2'b11
 `define UPDATE          1'b0
 `define STALL           1'b1
 `define NO_FLUSH        1'b0
 `define FLUSH           1'b1
 
-module rsicv#(
+module riscv#(
     parameter CPU_CLOCK_FREQ = 50_000_000,
     parameter RESET_PC = 32'h4000_0000,
     parameter BAUD_RATE = 115200
@@ -54,7 +54,7 @@ wire [13:0] imem_addra, imem_addrb;
 wire [3:0] imem_wea;
 wire imem_ena;
 wire RegWen;
-wire [1:0] WBSel;
+wire [2:0] WBSel;
 wire [4:0] ra1, ra2, wa;
 //reg  [31:0] wd;
 wire [31:0] rd1, rd2, branch_rd1, branch_rd2;
@@ -67,16 +67,24 @@ wire [31:0] imm_dout;
 wire [2:0] ImmSel;
 wire PCSel;
 wire [3:0] MemRW;
+//csr
+wire CSRSel;
+wire csr_en;
+wire [31:0] csr_data, forward_csr_data;
+wire [31:0] csr_dout;
+wire [11:0] csr_addr;
 
 //pipeline register
 reg [31:0] F_D_PC, D_E_PC, E_M_PC;
 reg [31:0] D_E_rd1, D_E_rd2, E_M_rd2;
 reg [31:0] D_E_inst, E_M_inst, M_W_inst;
+reg [31:0] E_M_csr_data;
+reg [11:0] D_E_csr_addr, E_M_csr_addr;
 reg [31:0] D_E_imm_dout;
 reg [31:0] E_M_alu, pc_alu;
 reg [31:0] M_W_wd;
 //pipeline register to implement forwarding logic
-reg [4:0]	D_E_ra1, D_E_ra2, D_E_wa;
+reg [4:0]	D_E_ra1, E_M_ra1, D_E_ra2, D_E_wa;
 reg [4:0]	E_M_wa;
 reg [4:0]	M_W_wa;
 reg [1:0]	Forward_A, Forward_B, branch_forward_1, branch_forward_2;
@@ -88,15 +96,15 @@ wire [4:0] inst_opcode_5;
 // Signal E_ASel, E_BSel, E_ALUSel will
 // be create in Decode stage, and consume in Execute stage, 
 // others will flow to next stage.
-reg E_ASel, E_BSel;
+reg E_ASel, E_BSel, E_CSRSel;
 reg [3:0] E_ALUSel;
 reg [3:0] E_MemRW;
-reg [1:0] E_WBSel;
+reg [2:0] E_WBSel;
 reg E_RegWen;
 //M_MemRW and M_WBSel will be consumed in Memory stage,
 //M_RegWen flow to next stage.
 reg [3:0] M_MemRW;
-reg [1:0] M_WBSel;
+reg [2:0] M_WBSel;
 reg M_RegWen;
 //The last signal W_RegWen will be consumed in Write
 //back stage.
@@ -122,36 +130,51 @@ assign alu_a = (E_ASel==`ASel_reg) ? D_E_rd1:D_E_PC;
 assign alu_b = (E_BSel==`BSel_reg) ? D_E_rd2:D_E_imm_dout;
 assign inst_opcode_5 = inst[6:2];
 
+assign csr_en = (M_WBSel == `WBSel_csr) ? 1:0;
+assign csr_addr = inst[31:20];
+assign csr_data = (CSRSel == `CSRSel_reg) ? D_E_rd1:D_E_imm_dout;
+
 /* forwarding unit */
 always@(*)
 begin
 	if(M_RegWen && E_M_wa != 5'b0 && E_M_wa == D_E_ra1)
-		Forward_A = `FORWORD_EX_MEM;
+		Forward_A = `FORWARD_EX_MEM;
 	else if(W_RegWen && M_W_wa != 5'b0 && M_W_wa == D_E_ra1)
-		Forward_A = `FORWORD_MEM_WB;
+		Forward_A = `FORWARD_MEM_WB;
 	else
-		Forward_A = `FORWORD_ID_EX;
+		Forward_A = `FORWARD_ID_EX;
 end
 
 always@(*)
 begin
 	if(M_RegWen && E_M_wa != 5'b0 && E_M_wa == D_E_ra2)
-		Forward_B = `FORWORD_EX_MEM;
+		Forward_B = `FORWARD_EX_MEM;
 	else if(W_RegWen && M_W_wa != 5'b0 && M_W_wa == D_E_ra2)
-		Forward_B = `FORWORD_MEM_WB;
+		Forward_B = `FORWARD_MEM_WB;
 	else
-		Forward_B = `FORWORD_ID_EX;
+		Forward_B = `FORWARD_ID_EX;
 end
 
-assign alu_forward_a = (Forward_A==`FORWORD_EX_MEM)?E_M_alu:((Forward_A==`FORWORD_MEM_WB)?M_W_wd:alu_a);
-assign alu_forward_b = (Forward_B==`FORWORD_EX_MEM)?E_M_alu:((Forward_B==`FORWORD_MEM_WB)?M_W_wd:alu_b);
+assign alu_forward_a = (Forward_A==`FORWARD_EX_MEM)?E_M_alu:((Forward_A==`FORWARD_MEM_WB)?M_W_wd:alu_a);
+assign alu_forward_b = (Forward_B==`FORWARD_EX_MEM)?E_M_alu:((Forward_B==`FORWARD_MEM_WB)?M_W_wd:alu_b);
 
 /* hazard detection unit */
 always@(*)
 begin
+    /*
+    * should we use E_MemRW here to detect whether a stall is needed? 
+    * because most of the instruct will set E_MemRW to MemRead.
+    */
     if(E_MemRW == `MemRead && E_WBSel == `WBSel_mem &&
         D_E_wa != 0 && (D_E_wa == ra1 || D_E_wa == ra2))begin
         /* stall the pipeline */
+        bubble  = `STALL;
+    end else if(E_WBSel == `WBSel_csr && D_E_wa != 0 && (D_E_wa == ra1 || D_E_wa == ra2)) begin
+        /*
+        * we can detect hazard in Decode stage for csrrw instruction
+        * csrrw x3, 0x10, x1
+        * add x4, x2, x3
+        */
         bubble  = `STALL;
     end else if(inst_opcode_5 == `B_type &&
         /*
@@ -182,25 +205,25 @@ always@(*)
 begin
     /* do we have to check M_RegWen or W_RegWen ? */
     if(ra1 != 5'b0 && ra1 == E_M_wa)
-        branch_forward_1 = `FORWORD_EX_MEM;
+        branch_forward_1 = `FORWARD_EX_MEM;
     else if(ra1 != 5'b0 && ra1 == M_W_wa)
-        branch_forward_1 = `FORWORD_MEM_WB;
+        branch_forward_1 = `FORWARD_MEM_WB;
     else
-        branch_forward_1 = `FORWORD_IF_ID;
+        branch_forward_1 = `FORWARD_IF_ID;
 end
 
 always@(*)
 begin
     if(ra2 != 5'b0 && ra2 == E_M_wa)
-        branch_forward_2 = `FORWORD_EX_MEM;
+        branch_forward_2 = `FORWARD_EX_MEM;
     else if(ra2 != 5'b0 && ra2 == M_W_wa)
-        branch_forward_2 = `FORWORD_MEM_WB;
+        branch_forward_2 = `FORWARD_MEM_WB;
     else
-        branch_forward_2 = `FORWORD_IF_ID;
+        branch_forward_2 = `FORWARD_IF_ID;
 end
 
-assign branch_rd1 = (branch_forward_1==`FORWORD_EX_MEM)?E_M_alu:((branch_forward_1==`FORWORD_MEM_WB)?M_W_wd:rd1);
-assign branch_rd2 = (branch_forward_2==`FORWORD_EX_MEM)?E_M_alu:((branch_forward_2==`FORWORD_MEM_WB)?M_W_wd:rd2);
+assign branch_rd1 = (branch_forward_1==`FORWARD_EX_MEM)?E_M_alu:((branch_forward_1==`FORWARD_MEM_WB)?M_W_wd:rd1);
+assign branch_rd2 = (branch_forward_2==`FORWARD_EX_MEM)?E_M_alu:((branch_forward_2==`FORWARD_MEM_WB)?M_W_wd:rd2);
 
 always@(posedge clk)
 begin
@@ -221,10 +244,25 @@ always@(*)pc_alu = F_D_PC + imm_dout;
 */
 always@(*)ID_Flush = (PCSel == `PCSel_next) ? `NO_FLUSH:`FLUSH;
 
-/* we need to handle big to little ending transform */
+/* forwarding unit for csr */
+/* can fix such data hazard
+* ld x10, (x1)
+* csrrw x3, 0x10, x10
+* or
+* add x10, x11, x12 
+* csrrw x3, 0x10, x10
+*/
+/* what if M_W_wa is x0 ? */
+assign forward_csr_data = (M_WBSel == `WBSel_csr) ? ((M_W_wa == E_M_ra1)?M_W_wd:E_M_csr_data):E_M_csr_data;
+
+/* we need to handle big to little ending transform if we use 
+* riscv32-unknown-elf-objcopy to generate our hex file, but 
+* with riscv32-unknown-elf-bin2hex, we do not need it.
+*/
 always@(*)
 begin
-	inst = {F_D_inst[7:0], F_D_inst[15:8], F_D_inst[23:16], F_D_inst[31:24]};
+	//inst = {F_D_inst[7:0], F_D_inst[15:8], F_D_inst[23:16], F_D_inst[31:24]};
+	inst = F_D_inst;
 end
 
 bios_mem bios_mem (
@@ -256,6 +294,14 @@ imem imem (
     .doutb(imem_doutb)
 );
 
+csr csr (
+    .clk(clk),
+    .en(csr_en),
+    .addr(E_M_csr_addr),
+    .din(forward_csr_data),
+    .dout(csr_dout)
+);
+
 always@(*)
 begin
     case (M_WBSel)
@@ -270,6 +316,7 @@ begin
             end
         `WBSel_alu: wd = E_M_alu;
         `WBSel_pc_next: wd = E_M_PC + 31'd4;
+        `WBSel_csr: wd = csr_dout;
         default: wd = E_M_alu;
     endcase
 end
@@ -313,6 +360,7 @@ control control_0(
     .BrUn(BrUn),
     .ASel(ASel),
     .BSel(BSel),
+    .CSRSel(CSRSel),
     .ALUSel(ALUSel),
     .MemRW(MemRW),
     .WBSel(WBSel)
@@ -347,6 +395,7 @@ begin
         D_E_wa  <= 5'd0;
         E_M_wa  <= 5'd0;
         M_W_wa  <= 5'd0;
+        E_M_ra1 <= 5'd0;
         E_M_rd2 <= 32'd0;
         E_M_PC  <= RESET_PC;
         E_M_alu <= 32'd0;
@@ -356,12 +405,13 @@ begin
         M_W_inst<= 32'd0;
         E_ASel      <= 1'b0;
         E_BSel      <= 1'b0;
+        E_CSRSel    <= `CSRSel_reg;
         E_ALUSel    <= 4'b0;
         E_MemRW     <= 4'b0;
-        E_WBSel     <= 2'b0;
+        E_WBSel     <= 3'b0;
         E_RegWen    <= 1'b0;
         M_MemRW     <= 4'b0;
-        M_WBSel     <= 2'b0;
+        M_WBSel     <= 3'b0;
         M_RegWen    <= 1'b0;
         W_RegWen    <= 1'b0;
         bubble      <= `UPDATE;
@@ -386,6 +436,7 @@ begin
         D_E_ra1     <= ra1;
         D_E_ra2     <= ra2;
         D_E_imm_dout<= imm_dout;
+        D_E_csr_addr<= csr_addr;
         //--control signal
         E_ASel      <= ASel;
         E_BSel      <= BSel;
@@ -405,10 +456,13 @@ begin
         E_M_alu     <= alu_out; 
         E_M_inst    <= D_E_inst;
         E_M_wa		<= D_E_wa;
+        E_M_csr_data<= csr_data;
+        E_M_csr_addr<= D_E_csr_addr;
         //Execute->Memory
         M_WBSel     <= E_WBSel;
         M_MemRW     <= E_MemRW;
         M_RegWen    <= E_RegWen;
+        E_M_ra1     <= D_E_ra1;
         //Memory->Write back
         M_W_wd      <= wd;
         M_W_wa		<= E_M_wa;

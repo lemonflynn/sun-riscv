@@ -32,7 +32,8 @@ begin
         `ImmSel_S:out = {{20{inst[31]}},inst[31:25],inst[11:7]};
         `ImmSel_B:out = {{19{inst[31]}},inst[7],inst[30:25],inst[11:8],1'b0};
         `ImmSel_J:out = {{12{inst[31]}},inst[19:12],inst[20],inst[30:25],inst[24:21],1'b0};
-        `ImmSel_U:out = {{inst[31:12]}, 12'b0};
+        `ImmSel_U:out = {inst[31:12], 12'b0};
+        `ImmSel_CSR:out = {27'b0,inst[19:15]};
         default:out = 32'd0;
     endcase
 end

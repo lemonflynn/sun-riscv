@@ -13,7 +13,7 @@ module assembly_testbench();
     initial clk = 0;
     always #(CPU_CLOCK_PERIOD/2) clk <= ~clk;
 
-    rsicv # (
+    riscv # (
         .CPU_CLOCK_FREQ(CPU_CLOCK_FREQ)
     ) CPU(
         .clk(clk),
@@ -47,7 +47,7 @@ module assembly_testbench();
     reg done = 0;
     initial begin
         //$readmemh("../sim/assembly_tests.vh", CPU.bios_mem.mem, 0, 4095);
-        $readmemh("../sim/assembly_tests.vh", CPU.bios_mem.mem);
+        $readmemh("../sim/assembly_tests.hex", CPU.bios_mem.mem);
 		for(index = 0;index < 20;index = index + 1)
 				$display("%x ", CPU.bios_mem.mem[index]);
 
@@ -66,9 +66,11 @@ module assembly_testbench();
         rst = 0;
         repeat (30) @(posedge clk);             // Hold reset for 30 cycles
         rst = 1;
-		$monitor("x1 is %d, x2 is %d, x3 is %d\n", CPU.rf.regs[1],
+		$monitor("time: %0t x1 is %d, x2 is %d, x3 is %d, csr 0x10 is %d\n", $time,
+                                                    CPU.rf.regs[1],
 													CPU.rf.regs[2], 
-													CPU.rf.regs[3]); 
+													CPU.rf.regs[3],
+                                                    CPU.csr.mem[16]);
 
         fork
             begin

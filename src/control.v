@@ -29,9 +29,10 @@ module control(
     output reg BrUn,
     output reg ASel,
     output reg BSel,
+    output reg CSRSel,
     output reg [3:0] ALUSel,
     output reg [3:0] MemRW,
-    output reg [1:0] WBSel 
+    output reg [2:0] WBSel
     );
 
 parameter BEQ     = 3'b000;
@@ -56,11 +57,12 @@ begin
     //following decode process.
     PCSel   = `PCSel_next;
     ImmSel  = `ImmSel_I;
-    BrUn = 0;
+    BrUn    = 0;
     ASel    = `ASel_reg;
     BSel    = `BSel_reg;
     ALUSel  = {func7_1, func3};
     MemRW   = `MemRead;
+    CSRSel  = `CSRSel_reg;
     RegWen  = 1;
     WBSel   = `WBSel_alu;
     case(opcode_5)
@@ -179,6 +181,17 @@ begin
             MemRW   = `MemRead;
             RegWen  = 1;
             WBSel   = `WBSel_pc_next;
+        end
+        `CSR_type:begin
+            WBSel   = `WBSel_csr;
+            /*CSRRW*/
+            if(func3 == 3'b001) begin
+                CSRSel = `CSRSel_reg;
+            /*CSRRWI*/
+            end else if(func3 == 3'b101) begin
+                CSRSel = `CSRSel_imm;
+                ImmSel = `ImmSel_CSR;
+            end
         end
         default:begin
             PCSel   = `PCSel_next;
