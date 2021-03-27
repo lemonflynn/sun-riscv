@@ -26,6 +26,7 @@
 `define JALR_type  5'b11001
 `define AUIPC_type 5'b00101
 `define LUI_type   5'b01101
+`define CSR_type   5'b11100
 
 // Load and store function codes
 `define FNC_LB     3'b000
@@ -43,8 +44,11 @@
 `define ImmSel_B       3'd2
 `define ImmSel_J       3'd3
 `define ImmSel_U       3'd4
+`define ImmSel_CSR     3'd5
 `define PCSel_next     1'b0
 `define PCSel_alu      1'b1
+`define CSRSel_reg     1'b0
+`define CSRSel_imm     1'b1
 `define ASel_reg       0
 `define ASel_pc        1
 `define BSel_reg       0
@@ -52,6 +56,7 @@
 `define WBSel_mem      2'd0
 `define WBSel_alu      2'd1
 `define WBSel_pc_next  2'd2
+`define WBSel_csr      2'd3
 `define MemRead        4'b0000
 `define MemWrite_B     4'b0001 //store byte
 `define MemWrite_H     4'b0011 //store half word
