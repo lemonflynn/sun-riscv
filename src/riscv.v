@@ -225,9 +225,13 @@ end
 assign branch_rd1 = (branch_forward_1==`FORWARD_EX_MEM)?E_M_alu:((branch_forward_1==`FORWARD_MEM_WB)?M_W_wd:rd1);
 assign branch_rd2 = (branch_forward_2==`FORWARD_EX_MEM)?E_M_alu:((branch_forward_2==`FORWARD_MEM_WB)?M_W_wd:rd2);
 
-always@(posedge clk)
+always@(posedge clk or negedge rst)
 begin
-    if(bubble == `UPDATE) begin
+    /*
+    * if the first instruction is a branch instruction, we need to hold the instruction
+    * until the rst is high, and ignore the control signal.
+    */
+    if(rst != 1'b0 &&  bubble == `UPDATE) begin
         if(ID_Flush == `NO_FLUSH)
             F_D_inst <= (PC[30]==1'b1) ? bios_douta:imem_doutb;
         else
