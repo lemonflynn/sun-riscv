@@ -26,8 +26,8 @@ module dmem (
   input [31:0] din,
   output [31:0] dout
 );
-    //reg [31:0] mem [16384-1:0];
-    reg [31:0] mem [4096-1:0];
+    reg [31:0] mem [16384-1:0];
+    //reg [31:0] mem [4096-1:0];
     wire [11:0] addr_align;
 
     assign addr_align = addr[13:2];

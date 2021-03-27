@@ -8,7 +8,7 @@ module csr(
     output [31:0] dout
 );
 
-    reg [31:0] mem[1024-1:0];
+    reg [31:0] mem[4096-1:0];
 
     assign dout = mem[addr];
 

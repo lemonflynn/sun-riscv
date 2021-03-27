@@ -25,19 +25,17 @@ module imem (
   input [13:0] addra,
   input [31:0] dina,
   input [13:0] addrb,
-  output reg [31:0] doutb
+  output [31:0] doutb
 );
-  reg [31:0] mem [4096-1:0];
-  //reg [31:0] mem [16384-1:0];
+  //reg [31:0] mem [4096-1:0];
+  reg [31:0] mem [16384-1:0];
   wire[11:0] addra_align;
   wire[11:0] addrb_align;
 
   assign addra_align = addra[13:2];
   assign addrb_align = addrb[13:2];
 
-  always @(posedge clk) begin
-      doutb <= mem[addrb_align>>2];
-  end
+  assign doutb = mem[addrb_align];
 
   genvar i;
   generate for (i = 0; i < 4; i = i+1) begin:imem_byte
