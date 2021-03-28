@@ -55,7 +55,7 @@ wire [3:0] imem_wea;
 wire imem_ena;
 wire RegWen;
 wire [2:0] WBSel;
-wire [4:0] ra1, ra2, wa;
+reg [4:0] ra1, ra2, wa;
 //reg  [31:0] wd;
 wire [31:0] rd1, rd2, branch_rd1, branch_rd2;
 wire BrUn, BrLt, BrEq; 
@@ -95,6 +95,7 @@ reg [1:0]	Forward_A, Forward_B, branch_forward_1, branch_forward_2;
 //ID_Flush is used to flush F_D pipeline register when branch prediction failed.
 reg bubble, ID_Flush;
 wire [4:0] inst_opcode_5;
+wire [2:0] func3;
 //pipeline control register
 // Signal E_ASel, E_BSel, E_ALUSel will
 // be create in Decode stage, and consume in Execute stage, 
@@ -126,16 +127,62 @@ assign imem_addra = E_M_alu[13:0];
 assign imem_addrb = PC[13:0];
 assign imem_dina = E_M_rd2;
 assign imem_wea = M_MemRW;
-assign ra1 = inst[19:15];
-assign ra2 = inst[24:20];
-assign wa = inst[11:7];
 assign alu_a = (E_ASel==`ASel_reg) ? D_E_rd1:D_E_PC;
 assign alu_b = (E_BSel==`BSel_reg) ? D_E_rd2:D_E_imm_dout;
 assign inst_opcode_5 = inst[6:2];
+assign func3 = inst[14:12];
 
 assign csr_en = (M_WBSel == `WBSel_csr) ? 1:0;
 assign csr_addr = inst[31:20];
 assign csr_data = (CSRSel == `CSRSel_reg) ? D_E_rd1:D_E_imm_dout;
+
+/* decode rs1, rs2, and rd according to their instruction format,
+* this can prevent the wrong value to malfunction our hazard and
+* forwarding logic.
+*/
+always@(*)
+begin
+    case(inst_opcode_5)
+        `R_type:begin
+            ra1 = inst[19:15];
+            ra2 = inst[24:20];
+            wa = inst[11:7];
+        end
+        `I_type:begin
+            ra1 = inst[19:15];
+            ra2 = 5'b0;
+            wa = inst[11:7];
+        end
+        `S_type, `B_type:begin
+            ra1 = inst[19:15];
+            ra2 = inst[24:20];
+            wa = 5'b0;
+        end
+        `JAL_type, `LUI_type, `AUIPC_type:begin
+            ra1 = 5'b0;
+            ra2 = 5'b0;
+            wa = inst[11:7];
+        end
+        `JALR_type:begin
+            ra1 = inst[19:15];
+            ra2 = 5'b0;
+            wa = inst[11:7];
+        end
+        `CSR_type:begin
+            if(func3 == 3'b001)
+                ra1 = inst[19:15];
+            else
+                ra1 = 5'b0;
+            ra2 = 5'b0;
+            wa = inst[11:7];
+        end
+        default:begin
+            ra1 = inst[19:15];
+            ra2 = inst[24:20];
+            wa = inst[11:7];
+        end
+    endcase
+end
 
 /* forwarding unit */
 always@(*)
