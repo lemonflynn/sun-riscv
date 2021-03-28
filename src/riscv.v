@@ -60,6 +60,7 @@ wire [4:0] ra1, ra2, wa;
 wire [31:0] rd1, rd2, branch_rd1, branch_rd2;
 wire BrUn, BrLt, BrEq; 
 wire [31:0] alu_a, alu_b, alu_forward_a, alu_forward_b, alu_out;
+wire [31:0] pc_alu_base;
 wire ASel, BSel;
 wire[3:0] ALUSel;
 reg [31:0] PC, inst, F_D_inst;
@@ -69,8 +70,10 @@ wire PCSel;
 wire [3:0] MemRW;
 //csr
 wire CSRSel;
+reg E_M_CSRSel;
 wire csr_en;
-wire [31:0] csr_data, forward_csr_data;
+wire [31:0] csr_data;
+reg [31:0] forward_csr_data;
 wire [31:0] csr_dout;
 wire [11:0] csr_addr;
 
@@ -195,12 +198,36 @@ begin
         */
         M_WBSel == `WBSel_mem && E_M_wa != 0 && (E_M_wa == ra1 || E_M_wa == ra2))begin
         bubble  = `STALL;
+    end else if(inst_opcode_5 == `JALR_type && ra1 != 0)begin
+        if(D_E_wa == ra1)
+            /*
+            * handle hazard, such as
+            * add x1, x2, x3
+            * jalr x4, x1, 4
+            */
+            bubble = `STALL;
+        else if(M_WBSel == `WBSel_mem && E_M_wa == ra1)
+            /*
+            * handle hazard, we need to stall one more clock, such as
+            * ld x1, (x2)
+            * jalr x4, x1, 4
+            */
+            bubble = `STALL;
+        else
+            bubble = `UPDATE;
     end else begin
         bubble  = `UPDATE;
     end
 end
 
-/* forwarding unit for branch comparator */
+/*
+* forwarding unit for branch comparator
+* since the destnatioin address of jalr instruction
+* is also caculated in Decode stage, so we borrow
+* the branch_forward_1 signal and branch_rd1 to
+* handle data forward for jalr address caculation
+* logic.
+*/
 always@(*)
 begin
     /* do we have to check M_RegWen or W_RegWen ? */
@@ -241,7 +268,9 @@ begin
     end
 end
 
-always@(*)pc_alu = F_D_PC + imm_dout;
+/* borrow branch_rd1 from forwarding logic of branch comparator*/
+assign pc_alu_base = (inst_opcode_5 == `JALR_type) ? branch_rd1 : F_D_PC;
+always@(*)pc_alu = pc_alu_base + imm_dout;
 /*
 * If PCSel is not PCSel_next, which means we have a branch instruction,
 * we need to flush the pipeline.
@@ -257,7 +286,14 @@ always@(*)ID_Flush = (PCSel == `PCSel_next) ? `NO_FLUSH:`FLUSH;
 * csrrw x3, 0x10, x10
 */
 /* what if M_W_wa is x0 ? */
-assign forward_csr_data = (M_WBSel == `WBSel_csr) ? ((M_W_wa == E_M_ra1)?M_W_wd:E_M_csr_data):E_M_csr_data;
+//assign forward_csr_data = (M_WBSel == `WBSel_csr) ? ((M_W_wa == E_M_ra1)? M_W_wd:E_M_csr_data):E_M_csr_data;
+always@(*)
+begin
+    if(M_WBSel == `WBSel_csr && E_M_CSRSel == `CSRSel_reg && E_M_ra1 !=0 && M_W_wa == E_M_ra1)
+        forward_csr_data = M_W_wd;
+    else
+        forward_csr_data = E_M_csr_data;
+end
 
 /* we need to handle big to little ending transform if we use 
 * riscv32-unknown-elf-objcopy to generate our hex file, but 
@@ -462,6 +498,7 @@ begin
         E_M_wa		<= D_E_wa;
         E_M_csr_data<= csr_data;
         E_M_csr_addr<= D_E_csr_addr;
+        E_M_CSRSel  <= CSRSel;
         //Execute->Memory
         M_WBSel     <= E_WBSel;
         M_MemRW     <= E_MemRW;
