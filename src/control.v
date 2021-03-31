@@ -170,7 +170,7 @@ begin
             ALUSel  = `op_add;
             MemRW   = `MemRead;
             RegWen  = 1;
-            WBSel   = `WBSel_pc_next;
+            WBSel   = `WBSel_alu;
         end
         `LUI_type:begin
             PCSel   = `PCSel_next;
@@ -180,7 +180,7 @@ begin
             ALUSel  = `op_add;
             MemRW   = `MemRead;
             RegWen  = 1;
-            WBSel   = `WBSel_pc_next;
+            WBSel   = `WBSel_alu;
         end
         `CSR_type:begin
             WBSel   = `WBSel_csr;

@@ -27,7 +27,7 @@ module branch_comparator(
     );
 always@(*)
 begin
-    if(BrUn==0)begin
+    if(BrUn==1)begin
        if(input1 == input2)begin
            BrEq = 1;
            BrLt = 0;
