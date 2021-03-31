@@ -24,14 +24,26 @@ module dmem (
   input [3:0] we,
   input [13:0] addr,
   input [31:0] din,
-  output [31:0] dout
+  output reg [31:0] dout
 );
     reg [31:0] mem [16384-1:0];
     //reg [31:0] mem [4096-1:0];
     wire [11:0] addr_align;
+    wire [31:0] dout_align;
 
     assign addr_align = addr[13:2];
-    assign dout = en?mem[addr_align]:32'b0;
+    assign dout_align = en?mem[addr_align]:32'b0;
+
+    always@(*)
+    begin
+        case(addr[1:0])
+            2'b00: dout = dout_align;
+            2'b01: dout = {8'b0, {dout_align[31:8]}};
+            2'b10: dout = {16'b0, {dout_align[31:16]}};
+            2'b11: dout = {24'b0, {dout_align[31:24]}};
+            default: dout = dout_align;
+        endcase
+    end
 
     /*
     always @(posedge clk) begin

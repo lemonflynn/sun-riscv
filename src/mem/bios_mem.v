@@ -25,16 +25,28 @@ module bios_mem (
     output [31:0] douta,
     input enb,
     input [11:0] addrb,
-    output [31:0] doutb
+    output reg [31:0] doutb
 );
     reg [31:0] mem [4096-1:0];
 	wire [9:0] addra_align;
 	wire [9:0] addrb_align;
+    wire[31:0] doutb_align;
 	
 	assign addra_align = addra[11:2];
 	assign addrb_align = addrb[11:2];
     assign douta = ena?mem[addra_align]:32'b0;
-    assign doutb = enb?mem[addrb_align]:32'b0;
+    assign doutb_align = enb?mem[addrb_align]:32'b0;
+
+    always@(*)
+    begin
+        case(addrb[1:0])
+            2'b00: doutb = doutb_align;
+            2'b01: doutb = {8'b0, {doutb_align[31:8]}};
+            2'b10: doutb = {16'b0, {doutb_align[31:16]}};
+            2'b11: doutb = {24'b0, {doutb_align[31:24]}};
+            default: doutb = doutb_align;
+        endcase
+    end
 
     /*
     always @(posedge clk) begin
