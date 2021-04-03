@@ -44,7 +44,6 @@ module dmem (
             default: dout = dout_align;
         endcase
     end
-
     /*
     always @(posedge clk) begin
       if (en)
@@ -55,8 +54,24 @@ module dmem (
     genvar i;
     generate for (i = 0; i < 4; i = i+1) begin:dmem_byte
       always @(posedge clk) begin
-        if (we[i] && en)
-            mem[addr_align][i*8 +: 8] <= din[i*8 +: 8];
+        case(addr[1:0])
+            2'b00: begin
+                if (we[i] && en)
+                    mem[addr_align][i*8 +: 8] <= din[i*8 +: 8];
+            end
+            2'b01: begin
+                if (we[i] && en)
+                    mem[addr_align][(i+1)*8 +: 8] <= din[i*8 +: 8];
+            end
+            2'b10: begin
+                if (we[i] && en)
+                    mem[addr_align][(i+2)*8 +: 8] <= din[i*8 +: 8];
+            end
+            2'b11: begin
+                if (we[i] && en)
+                    mem[addr_align][(i+3)*8 +: 8] <= din[i*8 +: 8];
+            end
+        endcase
       end
     end endgenerate
 endmodule

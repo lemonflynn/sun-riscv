@@ -38,15 +38,16 @@ module riscv#(
     input clk,
     input rst,
     input FPGA_SERIAL_RX,
-    output FPGA_SERIAL_TX,
-    output reg[31:0] wd
+    output FPGA_SERIAL_TX
 );
 // Memories
 wire [11:0] bios_addra, bios_addrb;
 wire [31:0] bios_douta, bios_doutb;
+reg [31:0] bios_doutb_wd;
 wire bios_ena, bios_enb;
 wire [13:0] dmem_addr;
 wire [31:0] dmem_din, dmem_dout;
+reg [31:0] dmem_dout_wd;
 wire [3:0] dmem_we;
 wire dmem_en;
 wire [31:0] imem_dina, imem_doutb;
@@ -56,7 +57,7 @@ wire imem_ena;
 wire RegWen;
 wire [2:0] WBSel;
 reg [4:0] ra1, ra2, wa;
-//reg  [31:0] wd;
+reg  [31:0] wd;
 wire [31:0] rd1, rd2, branch_rd1, branch_rd2;
 wire BrUn, BrLt, BrEq; 
 wire [31:0] alu_a, alu_b, alu_forward_a, alu_forward_b, alu_out;
@@ -80,6 +81,7 @@ wire [11:0] csr_addr;
 //pipeline register
 reg [31:0] F_D_PC, D_E_PC, E_M_PC;
 reg [31:0] D_E_rd1, D_E_rd2, E_M_rd2;
+wire [31:0] D_E_rd2_forward;
 reg [31:0] D_E_inst, E_M_inst, M_W_inst;
 reg [31:0] E_M_csr_data;
 reg [11:0] D_E_csr_addr, E_M_csr_addr;
@@ -95,7 +97,7 @@ reg [1:0]	Forward_A, Forward_B, branch_forward_1, branch_forward_2;
 //ID_Flush is used to flush F_D pipeline register when branch prediction failed.
 reg bubble, ID_Flush;
 wire [4:0] inst_opcode_5;
-wire [2:0] func3;
+wire [2:0] func3, E_M_func3;
 //pipeline control register
 // Signal E_ASel, E_BSel, E_ALUSel will
 // be create in Decode stage, and consume in Execute stage, 
@@ -128,9 +130,10 @@ assign imem_addrb = PC[13:0];
 assign imem_dina = E_M_rd2;
 assign imem_wea = M_MemRW;
 assign alu_a = (E_ASel==`ASel_reg) ? D_E_rd1:D_E_PC;
-assign alu_b = (E_BSel==`BSel_reg) ? D_E_rd2:D_E_imm_dout;
+//assign alu_b = (E_BSel==`BSel_reg) ? D_E_rd2:D_E_imm_dout;
 assign inst_opcode_5 = inst[6:2];
 assign func3 = inst[14:12];
+assign E_M_func3 = E_M_inst[14:12];
 
 assign csr_en = (M_WBSel == `WBSel_csr) ? 1:0;
 assign csr_addr = inst[31:20];
@@ -148,7 +151,7 @@ begin
             ra2 = inst[24:20];
             wa = inst[11:7];
         end
-        `I_type:begin
+        `I_type, `Load_type:begin
             ra1 = inst[19:15];
             ra2 = 5'b0;
             wa = inst[11:7];
@@ -206,7 +209,8 @@ begin
 end
 
 assign alu_forward_a = (Forward_A==`FORWARD_EX_MEM)?E_M_alu:((Forward_A==`FORWARD_MEM_WB)?M_W_wd:alu_a);
-assign alu_forward_b = (Forward_B==`FORWARD_EX_MEM)?E_M_alu:((Forward_B==`FORWARD_MEM_WB)?M_W_wd:alu_b);
+assign D_E_rd2_forward = (Forward_B==`FORWARD_EX_MEM)?E_M_alu:((Forward_B==`FORWARD_MEM_WB)?M_W_wd:D_E_rd2);
+assign alu_forward_b = (E_BSel==`BSel_reg) ? D_E_rd2_forward:D_E_imm_dout;
 
 /* hazard detection unit */
 always@(*)
@@ -262,6 +266,9 @@ begin
             bubble = `STALL;
         else
             bubble = `UPDATE;
+    end else if(M_MemRW != `MemRead && E_WBSel == `WBSel_mem
+        && E_M_alu[13:2] == alu_out[13:2])begin
+        bubble  = `STALL;
     end else begin
         bubble  = `UPDATE;
     end
@@ -391,15 +398,50 @@ csr csr (
 
 always@(*)
 begin
+    if(M_WBSel == `WBSel_mem) begin
+        case (E_M_func3)
+            `FNC_LB: begin
+                bios_doutb_wd = {{24{bios_doutb[7]}}, bios_doutb[7:0]};
+                dmem_dout_wd = {{24{dmem_dout[7]}}, dmem_dout[7:0]};
+            end
+            `FNC_LH: begin
+                bios_doutb_wd = {{16{bios_doutb[15]}}, bios_doutb[15:0]};
+                dmem_dout_wd = {{16{dmem_dout[15]}}, dmem_dout[15:0]};
+            end
+            `FNC_LW: begin
+                bios_doutb_wd = bios_doutb;
+                dmem_dout_wd = dmem_dout;
+            end
+            `FNC_LBU: begin
+                bios_doutb_wd = {{24'b0}, bios_doutb[7:0]};
+                dmem_dout_wd = {{24'b0}, dmem_dout[7:0]};
+            end
+            `FNC_LHU: begin
+                bios_doutb_wd = {{16'b0}, bios_doutb[15:0]};
+                dmem_dout_wd = {{16'b0}, dmem_dout[15:0]};
+            end
+            default: begin
+                bios_doutb_wd = bios_doutb;
+                dmem_dout_wd = dmem_dout;
+            end
+        endcase
+    end else begin
+        bios_doutb_wd = 32'b0;
+        dmem_dout_wd = 32'b0;
+    end
+end
+
+always@(*)
+begin
     case (M_WBSel)
         `WBSel_mem: begin
             //we should also decode I/O memory, which MSB is 1
             if(E_M_PC[30] == 1'b1)
-                wd = bios_doutb; 
+                wd = bios_doutb_wd;
             else if(E_M_PC[28] == 1'b1)
-                wd = dmem_dout; 
+                wd = dmem_dout_wd;
             else
-                wd = dmem_dout;
+                wd = dmem_dout_wd;
             end
         `WBSel_alu: wd = E_M_alu;
         `WBSel_pc_next: wd = E_M_PC + 31'd4;
@@ -539,7 +581,7 @@ begin
             D_E_wa      <= wa;
         end
         E_M_PC      <= D_E_PC;
-        E_M_rd2     <= D_E_rd2;
+        E_M_rd2     <= D_E_rd2_forward;
         E_M_alu     <= alu_out; 
         E_M_inst    <= D_E_inst;
         E_M_wa		<= D_E_wa;
