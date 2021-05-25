@@ -44,8 +44,12 @@ module riscv#(
 wire [11:0] bios_addra, bios_addrb;
 wire [31:0] bios_douta, bios_doutb;
 reg [31:0] bios_doutb_wd;
+wire [3:0] mmio_we;
+wire [31:0] mmio_dout, mmio_din;
+reg [31:0] mmio_dout_wd;
+wire instruction_complete;
 wire bios_ena, bios_enb;
-wire [13:0] dmem_addr;
+wire [13:0] dmem_addr, mmio_addr;
 wire [31:0] dmem_din, dmem_dout;
 reg [31:0] dmem_dout_wd;
 wire [3:0] dmem_we;
@@ -82,7 +86,7 @@ wire [11:0] csr_addr;
 reg [31:0] F_D_PC, D_E_PC, E_M_PC;
 reg [31:0] D_E_rd1, D_E_rd2, E_M_rd2;
 wire [31:0] D_E_rd2_forward;
-reg [31:0] D_E_inst, E_M_inst, M_W_inst;
+reg [31:0] D_E_inst, E_M_inst, M_W_inst, complete_inst;
 reg [31:0] E_M_csr_data;
 reg [11:0] D_E_csr_addr, E_M_csr_addr;
 reg [31:0] D_E_imm_dout;
@@ -121,8 +125,11 @@ assign bios_enb = 1;
 assign bios_addra = PC[11:0];
 assign bios_addrb = E_M_alu[11:0];
 assign dmem_addr = E_M_alu[13:0];
+assign mmio_addr = E_M_alu[13:0];
 assign dmem_din = E_M_rd2;
+assign mmio_din = E_M_rd2;
 assign dmem_we = M_MemRW;
+assign mmio_we = M_MemRW;
 assign dmem_en = 1;
 assign imem_ena = 1;
 assign imem_addra = E_M_alu[13:0];
@@ -138,6 +145,8 @@ assign E_M_func3 = E_M_inst[14:12];
 assign csr_en = (M_WBSel == `WBSel_csr) ? 1:0;
 assign csr_addr = inst[31:20];
 assign csr_data = (CSRSel == `CSRSel_reg) ? D_E_rd1:D_E_imm_dout;
+
+assign instruction_complete = (complete_inst != 32'b0) && complete_inst != M_W_inst;
 
 /* decode rs1, rs2, and rd according to their instruction format,
 * this can prevent the wrong value to malfunction our hazard and
@@ -359,6 +368,16 @@ begin
 	inst = F_D_inst;
 end
 
+mmio mmio_mem (
+    .clk(clk),
+    .en(1'b1),
+    .we(mmio_we),
+    .instruction_complete(instruction_complete),
+    .addr(mmio_addr),
+    .din(mmio_din),
+    .dout(mmio_dout)
+);
+
 bios_mem bios_mem (
     .clk(clk),
     .ena(bios_ena),
@@ -401,31 +420,38 @@ begin
     if(M_WBSel == `WBSel_mem) begin
         case (E_M_func3)
             `FNC_LB: begin
+                mmio_dout_wd = {{24{mmio_dout[7]}}, mmio_dout[7:0]};
                 bios_doutb_wd = {{24{bios_doutb[7]}}, bios_doutb[7:0]};
                 dmem_dout_wd = {{24{dmem_dout[7]}}, dmem_dout[7:0]};
             end
             `FNC_LH: begin
+                mmio_dout_wd = {{16{mmio_dout[15]}}, mmio_dout[15:0]};
                 bios_doutb_wd = {{16{bios_doutb[15]}}, bios_doutb[15:0]};
                 dmem_dout_wd = {{16{dmem_dout[15]}}, dmem_dout[15:0]};
             end
             `FNC_LW: begin
+                mmio_dout_wd = mmio_dout;
                 bios_doutb_wd = bios_doutb;
                 dmem_dout_wd = dmem_dout;
             end
             `FNC_LBU: begin
+                mmio_dout_wd = {{24'b0}, mmio_dout[7:0]};
                 bios_doutb_wd = {{24'b0}, bios_doutb[7:0]};
                 dmem_dout_wd = {{24'b0}, dmem_dout[7:0]};
             end
             `FNC_LHU: begin
+                mmio_dout_wd = {{16'b0}, mmio_dout[15:0]};
                 bios_doutb_wd = {{16'b0}, bios_doutb[15:0]};
                 dmem_dout_wd = {{16'b0}, dmem_dout[15:0]};
             end
             default: begin
+                mmio_dout_wd = mmio_dout;
                 bios_doutb_wd = bios_doutb;
                 dmem_dout_wd = dmem_dout;
             end
         endcase
     end else begin
+        mmio_dout_wd = 32'b0;
         bios_doutb_wd = 32'b0;
         dmem_dout_wd = 32'b0;
     end
@@ -436,6 +462,8 @@ begin
     case (M_WBSel)
         `WBSel_mem: begin
             //we should also decode I/O memory, which MSB is 1
+            if(E_M_PC[31] == 1'b1)
+                wd = mmio_dout_wd;
             if(E_M_PC[30] == 1'b1)
                 wd = bios_doutb_wd;
             else if(E_M_PC[28] == 1'b1)
@@ -597,6 +625,7 @@ begin
         M_W_wd      <= wd;
         M_W_wa		<= E_M_wa;
         M_W_inst    <= E_M_inst;
+        complete_inst <= M_W_inst;
         W_RegWen    <= M_RegWen;
     end
 end
