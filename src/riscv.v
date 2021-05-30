@@ -30,6 +30,9 @@
 `define NO_FLUSH        1'b0
 `define FLUSH           1'b1
 
+`define BUBBLE_AT_D_STAGE 1'b0
+`define BUBBLE_AT_E_STAGE 1'b1
+
 module riscv#(
     parameter CPU_CLOCK_FREQ = 50_000_000,
     parameter RESET_PC = 32'h4000_0000,
@@ -44,6 +47,7 @@ module riscv#(
 wire [11:0] bios_addra, bios_addrb;
 wire [31:0] bios_douta, bios_doutb;
 reg [31:0] bios_doutb_wd;
+wire mmio_en;
 wire [3:0] mmio_we;
 wire [31:0] mmio_dout, mmio_din;
 reg [31:0] mmio_dout_wd;
@@ -99,8 +103,8 @@ reg [4:0]	M_W_wa;
 reg [1:0]	Forward_A, Forward_B, branch_forward_1, branch_forward_2;
 //bubble is insert in to pipeline if we need to stall pipeline for one clock.
 //ID_Flush is used to flush F_D pipeline register when branch prediction failed.
-reg bubble, ID_Flush;
-wire [4:0] inst_opcode_5;
+reg bubble, bubble_delay1, bubble_location, bubble_location_delay1, ID_Flush;
+wire [4:0] inst_opcode_5, E_M_inst_opcode_5;
 wire [2:0] func3, E_M_func3;
 //pipeline control register
 // Signal E_ASel, E_BSel, E_ALUSel will
@@ -122,6 +126,16 @@ reg W_RegWen;
 
 assign bios_ena = 1;
 assign bios_enb = 1;
+/*
+* we should check carefully wheter we are accessing mmio or not,
+* because access mmio would triggle hand-shaking logic of UART,
+* such as
+* addi x5, x5, 8
+* if the alu out is 0x8000_0008, this would make mmio think this
+* instruction going to transmit a byte, thus issue a wrong
+* hand-shaking signal.
+*/
+assign mmio_en = (E_M_inst_opcode_5 == `Load_type || E_M_inst_opcode_5 == `S_type) && (E_M_alu[31] == 1'b1);
 assign bios_addra = PC[11:0];
 assign bios_addrb = E_M_alu[11:0];
 assign dmem_addr = E_M_alu[13:0];
@@ -139,6 +153,7 @@ assign imem_wea = M_MemRW;
 assign alu_a = (E_ASel==`ASel_reg) ? D_E_rd1:D_E_PC;
 //assign alu_b = (E_BSel==`BSel_reg) ? D_E_rd2:D_E_imm_dout;
 assign inst_opcode_5 = inst[6:2];
+assign E_M_inst_opcode_5 = E_M_inst[6:2];
 assign func3 = inst[14:12];
 assign E_M_func3 = E_M_inst[14:12];
 
@@ -232,6 +247,7 @@ begin
         D_E_wa != 0 && (D_E_wa == ra1 || D_E_wa == ra2))begin
         /* stall the pipeline */
         bubble  = `STALL;
+        bubble_location = `BUBBLE_AT_D_STAGE;
     end else if(E_WBSel == `WBSel_csr && D_E_wa != 0 && (D_E_wa == ra1 || D_E_wa == ra2)) begin
         /*
         * we can detect hazard in Decode stage for csrrw instruction
@@ -239,6 +255,7 @@ begin
         * add x4, x2, x3
         */
         bubble  = `STALL;
+        bubble_location = `BUBBLE_AT_D_STAGE;
     end else if(inst_opcode_5 == `B_type &&
         /*
         * if branch instruction need the result from previous instruction, and
@@ -249,6 +266,7 @@ begin
         */
         D_E_wa != 0 && (D_E_wa == ra1 || D_E_wa == ra2))begin
         bubble  = `STALL;
+        bubble_location = `BUBBLE_AT_D_STAGE;
     end else if(inst_opcode_5 == `B_type &&
         /*
         * if load followed by branch, we need to stall one more clock
@@ -258,28 +276,45 @@ begin
         */
         M_WBSel == `WBSel_mem && E_M_wa != 0 && (E_M_wa == ra1 || E_M_wa == ra2))begin
         bubble  = `STALL;
+        bubble_location = `BUBBLE_AT_D_STAGE;
     end else if(inst_opcode_5 == `JALR_type && ra1 != 0)begin
-        if(D_E_wa == ra1)
+        if(D_E_wa == ra1) begin
             /*
             * handle hazard, such as
             * add x1, x2, x3
             * jalr x4, x1, 4
             */
             bubble = `STALL;
-        else if(M_WBSel == `WBSel_mem && E_M_wa == ra1)
+            bubble_location = `BUBBLE_AT_D_STAGE;
+        end else if(M_WBSel == `WBSel_mem && E_M_wa == ra1) begin
             /*
             * handle hazard, we need to stall one more clock, such as
             * ld x1, (x2)
             * jalr x4, x1, 4
             */
             bubble = `STALL;
-        else
+            bubble_location = `BUBBLE_AT_D_STAGE;
+        end else begin
             bubble = `UPDATE;
+        end
     end else if(M_MemRW != `MemRead && E_WBSel == `WBSel_mem
         && E_M_alu[13:2] == alu_out[13:2])begin
+        /* handle mem read after write */
         bubble  = `STALL;
+        bubble_location = `BUBBLE_AT_E_STAGE;
     end else begin
         bubble  = `UPDATE;
+    end
+end
+
+always@(posedge clk or negedge rst)
+begin
+    if(rst == 1'b0) begin
+        bubble_delay1 <= 1'b0;
+        bubble_location_delay1 <= 1'b0;
+    end else begin
+        bubble_delay1 <= bubble;
+        bubble_location_delay1 <= bubble_location;
     end
 end
 
@@ -368,14 +403,20 @@ begin
 	inst = F_D_inst;
 end
 
-mmio mmio_mem (
+mmio # (
+    .CPU_CLOCK_FREQ(CPU_CLOCK_FREQ),
+    .BAUD_RATE(BAUD_RATE)
+) mmio_mem (
     .clk(clk),
-    .en(1'b1),
+    .reset(rst),
+    .en(mmio_en),
     .we(mmio_we),
     .instruction_complete(instruction_complete),
     .addr(mmio_addr),
     .din(mmio_din),
-    .dout(mmio_dout)
+    .dout(mmio_dout),
+    .serial_in(FPGA_SERIAL_RX),
+    .serial_out(FPGA_SERIAL_TX)
 );
 
 bios_mem bios_mem (
@@ -461,12 +502,12 @@ always@(*)
 begin
     case (M_WBSel)
         `WBSel_mem: begin
-            //we should also decode I/O memory, which MSB is 1
-            if(E_M_PC[31] == 1'b1)
+            /* we should use E_M_alu to decide memory resource */
+            if(E_M_alu[31] == 1'b1)
                 wd = mmio_dout_wd;
-            if(E_M_PC[30] == 1'b1)
+            else if(E_M_alu[30] == 1'b1)
                 wd = bios_doutb_wd;
-            else if(E_M_PC[28] == 1'b1)
+            else if(E_M_alu[28] == 1'b1)
                 wd = dmem_dout_wd;
             else
                 wd = dmem_dout_wd;
@@ -608,9 +649,13 @@ begin
             E_RegWen    <= RegWen;
             D_E_wa      <= wa;
         end
+
+        if(bubble_delay1 == `STALL && bubble_location_delay1 == `BUBBLE_AT_D_STAGE)
+            E_M_alu     <= 32'd0;
+        else
+            E_M_alu     <= alu_out;
         E_M_PC      <= D_E_PC;
         E_M_rd2     <= D_E_rd2_forward;
-        E_M_alu     <= alu_out; 
         E_M_inst    <= D_E_inst;
         E_M_wa		<= D_E_wa;
         E_M_csr_data<= csr_data;

@@ -25,24 +25,33 @@
 `define INSTRUCTION_COUNTER 16'h14
 `define RESET_COUNTER       16'h18
 
-module mmio(
-  input clk,
-  input en,
-  input [3:0] we,
-  input instruction_complete,
-  input [13:0] addr,
-  input [31:0] din,
-  output reg [31:0] dout
+module mmio # (
+    parameter CPU_CLOCK_FREQ = 50_000_000,
+    parameter BAUD_RATE = 115200
+)(
+    input clk,
+    input reset,
+    input en,
+    input [3:0] we,
+    input instruction_complete,
+    input [13:0] addr,
+    input [31:0] din,
+    output reg [31:0] dout,
+    input serial_in,
+    output serial_out
 );
 reg [31:0] clock_counter;
 reg [31:0] instruction_counter;
 reg [31:0] uart_control;
-reg [31:0] uart_receive_data;
 reg [31:0] uart_transmit_data;
+reg trans_valid;
+reg receive_ready;
+wire data_in_ready, data_out_valid;
+wire [7:0] data_out;
 
 always@(posedge clk)
 begin
-    if(addr[7:0] != `RESET_COUNTER || we == 4'b0) begin
+    if(!en || addr[7:0] != `RESET_COUNTER || we == 4'b0) begin
         clock_counter <= clock_counter + 1;
         if(instruction_complete)
             instruction_counter <= instruction_counter + 1;
@@ -56,10 +65,23 @@ end
 
 always@(*)
 begin
+    if(en && addr[7:0] == `UART_RECEIVE_DATA)
+        receive_ready = 1'b1;
+    else
+        receive_ready = 1'b0;
+end
+
+always@(*)
+begin
     if(en) begin
         case(addr[7:0])
             `UART_CONTROL: dout = uart_control;
-            `UART_RECEIVE_DATA: dout = uart_receive_data;
+            `UART_RECEIVE_DATA:begin
+                if(data_out_valid)
+                    dout = {24'b0, data_out};
+                else
+                    dout = 32'b0;
+            end
             `CYCLE_COUNTER: dout = clock_counter;
             `INSTRUCTION_COUNTER: dout = instruction_counter;
             default: dout = 32'b0;
@@ -69,23 +91,43 @@ begin
     end
 end
 
-genvar i;
-generate for (i = 0; i < 4; i = i+1) begin:dmem_byte
 always @(posedge clk)
 begin
+    trans_valid <= 1'b0;
     if(en) begin
         case(addr[7:0])
             `UART_TRANSMIT_DATA: begin
-                if (we[i])
-                    uart_transmit_data[i*8 +: 8] <= din[i*8 +: 8];
+                trans_valid <= 1'b1;
+                if (we[0])
+                    uart_transmit_data <= {24'b0, din[7:0]};
             end
             `RESET_COUNTER: begin
-                if (we[i]) begin
+                if (we)
                     instruction_counter <= 32'b0;
-                end
             end
         endcase
     end
 end
-end endgenerate
+
+always @(posedge clk)
+begin
+    uart_control <= {30'b0, data_out_valid, data_in_ready};
+end
+
+uart #(
+    .CLOCK_FREQ(CPU_CLOCK_FREQ),
+    .BAUD_RATE(BAUD_RATE)
+) uart_on_chip (
+    .clk(clk),
+    .reset(reset),
+    .data_in(uart_transmit_data[7:0]), //transmit data
+    .data_in_valid(trans_valid),
+    .data_in_ready(data_in_ready),
+    .data_out(data_out), //receive data
+    .data_out_valid(data_out_valid),
+    .data_out_ready(receive_ready),
+    .serial_in(serial_in),
+    .serial_out(serial_out)
+);
+
 endmodule
