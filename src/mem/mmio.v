@@ -45,9 +45,12 @@ reg [31:0] instruction_counter;
 reg [31:0] uart_control;
 reg [31:0] uart_transmit_data;
 reg trans_valid;
-reg receive_ready;
-wire data_in_ready, data_out_valid;
-wire [7:0] data_out;
+reg fifo_rd_en;
+wire fifo_full, fifo_empty, fifo_wr_en;
+reg reset_instruction_cnt;
+wire trans_ready;
+wire [7:0] fifo_in;
+wire[7:0] fifo_out;
 
 always@(posedge clk)
 begin
@@ -57,6 +60,8 @@ begin
             instruction_counter <= instruction_counter + 1;
         else
             instruction_counter <= instruction_counter;
+    end else if(reset_instruction_cnt == 1'b1) begin
+        instruction_counter <= 32'b0;
     end else begin
         clock_counter <= 32'b0;
         instruction_counter <= 32'b0;
@@ -66,9 +71,9 @@ end
 always@(*)
 begin
     if(en && addr[7:0] == `UART_RECEIVE_DATA)
-        receive_ready = 1'b1;
+        fifo_rd_en = 1'b1;
     else
-        receive_ready = 1'b0;
+        fifo_rd_en = 1'b0;
 end
 
 always@(*)
@@ -77,8 +82,8 @@ begin
         case(addr[7:0])
             `UART_CONTROL: dout = uart_control;
             `UART_RECEIVE_DATA:begin
-                if(data_out_valid)
-                    dout = {24'b0, data_out};
+                if(!fifo_empty)
+                    dout = {24'b0, fifo_out};
                 else
                     dout = 32'b0;
             end
@@ -94,6 +99,7 @@ end
 always @(posedge clk)
 begin
     trans_valid <= 1'b0;
+    reset_instruction_cnt <= 1'b0;
     if(en) begin
         case(addr[7:0])
             `UART_TRANSMIT_DATA: begin
@@ -104,7 +110,7 @@ begin
             end
             `RESET_COUNTER: begin
                 if (we)
-                    instruction_counter <= 32'b0;
+                    reset_instruction_cnt <= 1'b1;
             end
         endcase
     end
@@ -112,7 +118,7 @@ end
 
 always @(posedge clk)
 begin
-    uart_control <= {30'b0, data_out_valid, data_in_ready};
+    uart_control <= {30'b0, !fifo_empty, trans_ready};
 end
 
 uart #(
@@ -123,12 +129,27 @@ uart #(
     .reset(reset),
     .data_in(uart_transmit_data[7:0]), //transmit data
     .data_in_valid(trans_valid),
-    .data_in_ready(data_in_ready),
-    .data_out(data_out), //receive data
-    .data_out_valid(data_out_valid),
-    .data_out_ready(receive_ready),
+    .data_in_ready(trans_ready),
+    .data_out(fifo_in), //receive data
+    .data_out_valid(fifo_wr_en),
+    .data_out_ready(!fifo_full),
     .serial_in(serial_in),
     .serial_out(serial_out)
+);
+
+fifo # (
+    .data_width(8),
+    .fifo_depth(32)
+) fifo_1 (
+    .clk(clk),
+    .reset(reset),
+    .wr_en(fifo_wr_en),
+    .din(fifo_in),
+    .full(fifo_full),
+
+    .rd_en(fifo_rd_en),
+    .dout(fifo_out),
+    .empty(fifo_empty)
 );
 
 endmodule
