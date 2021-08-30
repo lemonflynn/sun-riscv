@@ -94,16 +94,18 @@ reg [31:0] D_E_inst, E_M_inst, M_W_inst, complete_inst;
 reg [31:0] E_M_csr_data;
 reg [11:0] D_E_csr_addr, E_M_csr_addr;
 reg [31:0] D_E_imm_dout;
-reg [31:0] E_M_alu, pc_alu;
+reg [31:0] E_M_alu;
+wire [31:0] pc_alu;
 reg [31:0] M_W_wd;
 //pipeline register to implement forwarding logic
-reg [4:0]	D_E_ra1, E_M_ra1, D_E_ra2, D_E_wa;
+reg [4:0] D_E_ra1, E_M_ra1, D_E_ra2, D_E_wa;
 reg [4:0]	E_M_wa;
 reg [4:0]	M_W_wa;
 reg [1:0]	Forward_A, Forward_B, branch_forward_1, branch_forward_2;
 //bubble is insert in to pipeline if we need to stall pipeline for one clock.
 //ID_Flush is used to flush F_D pipeline register when branch prediction failed.
-reg bubble, bubble_delay1, bubble_location, bubble_location_delay1, ID_Flush;
+reg bubble, bubble_delay1, bubble_location, bubble_location_delay1;
+wire ID_Flush;
 wire [4:0] inst_opcode_5, E_M_inst_opcode_5;
 wire [2:0] func3, E_M_func3;
 //pipeline control register
@@ -356,7 +358,9 @@ begin
     * if the first instruction is a branch instruction, we need to hold the instruction
     * until the rst is high, and ignore the control signal.
     */
-    if(rst != 1'b0 &&  bubble == `UPDATE) begin
+    if(rst == 1'b0) begin
+        F_D_inst <= 32'b0;
+    end else if(bubble == `UPDATE) begin
         if(ID_Flush == `NO_FLUSH)
             F_D_inst <= (PC[30]==1'b1) ? bios_douta:imem_doutb;
         else
@@ -368,12 +372,12 @@ end
 
 /* borrow branch_rd1 from forwarding logic of branch comparator*/
 assign pc_alu_base = (inst_opcode_5 == `JALR_type) ? branch_rd1 : F_D_PC;
-always@(*)pc_alu = pc_alu_base + imm_dout;
+assign pc_alu = pc_alu_base + imm_dout;
 /*
 * If PCSel is not PCSel_next, which means we have a branch instruction,
 * we need to flush the pipeline.
 */
-always@(*)ID_Flush = (PCSel == `PCSel_next) ? `NO_FLUSH:`FLUSH;
+assign ID_Flush = (PCSel == `PCSel_next) ? `NO_FLUSH:`FLUSH;
 
 /* forwarding unit for csr */
 /* can fix such data hazard
@@ -612,16 +616,13 @@ begin
         M_WBSel     <= 3'b0;
         M_RegWen    <= 1'b0;
         W_RegWen    <= 1'b0;
-        bubble      <= `UPDATE;
-        ID_Flush    <= `NO_FLUSH;
-        pc_alu      <= RESET_PC;
     end else begin
         //fetch->Decode
         if(bubble == `UPDATE)begin
             if(ID_Flush == `NO_FLUSH)
                 F_D_PC  <= PC;
             else
-            /* should be zeor ? */
+            /* should be zero ? */
                 F_D_PC  <= RESET_PC;
         end else begin
             F_D_PC  <= F_D_PC;
