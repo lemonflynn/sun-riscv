@@ -16,13 +16,10 @@ module uart #(
     input serial_in,
     output serial_out
 );
-    reg serial_in_reg, serial_out_reg;
+    wire serial_in_reg;
     wire serial_out_tx;
-    assign serial_out = serial_out_reg;
-    always @ (posedge clk or negedge reset) begin
-        serial_out_reg <= !reset ? 1'b1 : serial_out_tx;
-        serial_in_reg <= !reset ? 1'b1 : serial_in;
-    end
+    assign serial_out = !reset ? 1'b1 : serial_out_tx;
+    assign serial_in_reg = !reset ? 1'b1 : serial_in;
 
     uart_trans #(
         .CLOCK_FREQ(CLOCK_FREQ),
