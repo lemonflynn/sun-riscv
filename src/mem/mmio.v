@@ -97,9 +97,10 @@ begin
     if(en) begin
         case(addr[7:0])
             `UART_TRANSMIT_DATA: begin
-                trans_valid <= 1'b1;
-                if (we[0])
+                if (we[0]) begin
+                    trans_valid <= 1'b1;
                     uart_transmit_data <= {24'b0, din[7:0]};
+                end
             end
             `RESET_COUNTER: begin
                 if (we)

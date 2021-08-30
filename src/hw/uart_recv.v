@@ -53,7 +53,7 @@ wire neg_edge, sample;
 assign neg_edge = clock_counter == SYMBOL_EDGE_TIME;
 assign sample = clock_counter == SAMPLE_TIME;
 
-always@(posedge clk)
+always@(posedge clk or negedge reset)
 begin
     if(reset == 1'b0 || (cur_state != state_receiving))
         clock_counter <= 0;
@@ -63,7 +63,7 @@ begin
         clock_counter <= clock_counter + 1;
 end
 
-always@(posedge clk)
+always@(posedge clk or negedge reset)
 begin
     if(reset == 1'b0 || (cur_state != state_receiving))
         bit_counter <= 4'd0;
@@ -77,7 +77,7 @@ begin
         rx_shift <= {serial_in, rx_shift[9:1]};
 end
 
-always@(posedge clk)
+always@(posedge clk or negedge reset)
 begin
     if(reset == 1'b0)
         cur_state <= state_idle;

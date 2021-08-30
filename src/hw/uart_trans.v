@@ -92,7 +92,7 @@ begin
         tx_shift <= {1'b1, tx_shift[9:1]};
 end
 
-always@(posedge clk)
+always@(posedge clk or negedge reset)
 begin
     if(reset == 1'b0)
         cur_state <= state_idle;

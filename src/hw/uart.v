@@ -19,7 +19,7 @@ module uart #(
     reg serial_in_reg, serial_out_reg;
     wire serial_out_tx;
     assign serial_out = serial_out_reg;
-    always @ (posedge clk) begin
+    always @ (posedge clk or negedge reset) begin
         serial_out_reg <= !reset ? 1'b1 : serial_out_tx;
         serial_in_reg <= !reset ? 1'b1 : serial_in;
     end
