@@ -44,7 +44,7 @@ module riscv#(
     output FPGA_SERIAL_TX
 );
 // Memories
-wire [11:0] bios_addra, bios_addrb;
+wire [12:0] bios_addra, bios_addrb;
 wire [31:0] bios_douta, bios_doutb;
 reg [31:0] bios_doutb_wd;
 wire mmio_en;
@@ -138,8 +138,8 @@ assign bios_enb = 1;
 * hand-shaking signal.
 */
 assign mmio_en = (E_M_inst_opcode_5 == `Load_type || E_M_inst_opcode_5 == `S_type) && (E_M_alu[31] == 1'b1);
-assign bios_addra = PC[11:0];
-assign bios_addrb = E_M_alu[11:0];
+assign bios_addra = PC[12:0];
+assign bios_addrb = E_M_alu[12:0];
 assign dmem_addr = E_M_alu[13:0];
 assign mmio_addr = E_M_alu[13:0];
 assign dmem_din = E_M_rd2;

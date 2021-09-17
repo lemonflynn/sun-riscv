@@ -21,19 +21,19 @@
 module bios_mem (
     input clk,
     input ena,
-    input [11:0] addra,
+    input [12:0] addra,
     output [31:0] douta,
     input enb,
-    input [11:0] addrb,
+    input [12:0] addrb,
     output reg [31:0] doutb
 );
     reg [31:0] mem [4096-1:0];
-	wire [9:0] addra_align;
-	wire [9:0] addrb_align;
+	wire [10:0] addra_align;
+	wire [10:0] addrb_align;
     wire[31:0] doutb_align;
 	
-	assign addra_align = addra[11:2];
-	assign addrb_align = addrb[11:2];
+	assign addra_align = addra[12:2];
+	assign addrb_align = addrb[12:2];
     assign douta = ena?mem[addra_align]:32'b0;
     assign doutb_align = enb?mem[addrb_align]:32'b0;
 
