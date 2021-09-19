@@ -43,7 +43,7 @@ module mmio # (
 reg [31:0] clock_counter;
 reg [31:0] instruction_counter;
 reg [31:0] uart_control;
-reg [31:0] uart_transmit_data;
+reg [7:0] uart_transmit_data;
 reg trans_valid;
 reg fifo_rd_en;
 wire fifo_full, fifo_empty, fifo_wr_en;
@@ -105,7 +105,7 @@ begin
             `UART_TRANSMIT_DATA: begin
                 if (we[0]) begin
                     trans_valid <= 1'b1;
-                    uart_transmit_data <= {24'b0, din[7:0]};
+                    uart_transmit_data <= din[7:0];
                 end
             end
             `RESET_COUNTER: begin
@@ -127,7 +127,7 @@ uart #(
 ) uart_on_chip (
     .clk(clk),
     .reset(reset),
-    .data_in(uart_transmit_data[7:0]), //transmit data
+    .data_in(uart_transmit_data), //transmit data
     .data_in_valid(trans_valid),
     .data_in_ready(trans_ready),
     .data_out(fifo_in), //receive data
