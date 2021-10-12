@@ -24,6 +24,7 @@
 `define CYCLE_COUNTER       16'h10
 `define INSTRUCTION_COUNTER 16'h14
 `define RESET_COUNTER       16'h18
+`define GPIO_LEDS           16'h30
 
 module mmio # (
     parameter CPU_CLOCK_FREQ = 50_000_000,
@@ -37,6 +38,7 @@ module mmio # (
     input [13:0] addr,
     input [31:0] din,
     output reg [31:0] dout,
+    output [3:0] led_out,
     input serial_in,
     output serial_out
 );
@@ -44,6 +46,7 @@ reg [31:0] clock_counter;
 reg [31:0] instruction_counter;
 reg [31:0] uart_control;
 reg [7:0] uart_transmit_data;
+reg [3:0] led_latch;
 reg trans_valid;
 reg fifo_rd_en;
 wire fifo_full, fifo_empty, fifo_wr_en;
@@ -51,6 +54,8 @@ reg reset_instruction_cnt;
 wire trans_ready;
 wire [7:0] fifo_in;
 wire[7:0] fifo_out;
+
+assign led_out = led_latch;
 
 always@(posedge clk)
 begin
@@ -98,22 +103,27 @@ end
 
 always @(posedge clk)
 begin
-    trans_valid <= 1'b0;
-    reset_instruction_cnt <= 1'b0;
-    if(en) begin
-        case(addr[7:0])
-            `UART_TRANSMIT_DATA: begin
-                if (we[0]) begin
-                    trans_valid <= 1'b1;
-                    uart_transmit_data <= din[7:0];
-                end
-            end
-            `RESET_COUNTER: begin
-                if (we)
-                    reset_instruction_cnt <= 1'b1;
-            end
-        endcase
+    if(en && we[0] && addr[7:0] == `GPIO_LEDS)
+        led_latch <= din[3:0];
+end
+
+always @(posedge clk)
+begin
+    if(en && we[0] && addr[7:0] == `UART_TRANSMIT_DATA) begin
+        trans_valid <= 1'b1;
+        uart_transmit_data <= din[7:0];
+    end else begin
+        trans_valid <= 1'b0;
+        uart_transmit_data <= 8'b0;
     end
+end
+
+always @(posedge clk)
+begin
+    if(en && we && addr[7:0] == `RESET_COUNTER)
+        reset_instruction_cnt <= 1'b1;
+    else
+        reset_instruction_cnt <= 1'b0;
 end
 
 always @(posedge clk)

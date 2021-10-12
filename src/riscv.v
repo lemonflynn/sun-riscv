@@ -40,6 +40,7 @@ module riscv#(
 )(
     input clk,
     input rst,
+    output [3:0] led_o,
     input FPGA_SERIAL_RX,
     output FPGA_SERIAL_TX
 );
@@ -419,6 +420,7 @@ mmio # (
     .addr(mmio_addr),
     .din(mmio_din),
     .dout(mmio_dout),
+    .led_out(led_o),
     .serial_in(FPGA_SERIAL_RX),
     .serial_out(FPGA_SERIAL_TX)
 );
